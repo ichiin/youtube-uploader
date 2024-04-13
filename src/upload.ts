@@ -291,55 +291,103 @@ async function uploadVideo(videoJSON: Video, messageTransport: MessageTransport)
     // const moreOption = await page.$x("//*[normalize-space(text())='Show more']")
     // await moreOption[0]?.click()
 
-    const playlist = await page.$x("//*[normalize-space(text())='Select']")
-    let createplaylistdone
-    if (playlistName) {
+    const playlist = await page.$x("//*[normalize-space(text())='Select']");
+    let createplaylistdone;
+    if(Array.isArray(playlistName)){
+        for(const playlistn of playlistName){
+                let playlistSet = false;
+                // Selecting playlist
+                for (let i = 0; i < 2; i++) {
+                    try {
+                        await page.evaluate((el) => el.click(), playlist[0]);
+                        // Type the playlist name to filter out
+                        await page.waitForSelector('#search-input');
+                        await page.focus(`#search-input`);
+                        await page.type(`#search-input`, playlistn);
+                        const escapedPlaylistName = escapeQuotesForXPath(playlistn);
+                        const playlistToSelectXPath = '//*[normalize-space(text())=' + escapedPlaylistName + ']';
+                        await page.waitForXPath(playlistToSelectXPath, { timeout: 10000 });
+                        const playlistNameSelector = await page.$x(playlistToSelectXPath);
+                        await page.evaluate((el) => el.click(), playlistNameSelector[0]);
+                        createplaylistdone = await page.$x("//*[normalize-space(text())='Done']");
+                        await page.evaluate((el) => el.click(), createplaylistdone[0]);
+                        playlistSet = true;
+                        break;
+                    }
+                    catch (error) {
+                        messageTransport.log(`  >> ${videoJSON.title} - ${playlistn} not found. Creating...`);
+                        // Creating new playlist
+                        // click on playlist dropdown
+                        await page.evaluate((el) => el.click(), playlist[0]);
+                        // click New playlist button
+                        const newPlaylistXPath = "//*[normalize-space(text())='New playlist'] | //*[normalize-space(text())='Create playlist']";
+                        await page.waitForXPath(newPlaylistXPath);
+                        const createplaylist = await page.$x(newPlaylistXPath);
+                        await page.evaluate((el) => el.click(), createplaylist[0]);
+                        // Enter new playlist name
+                        await page.keyboard.type(' ' + playlistn.substring(0, 148));
+                        // click create & then done button
+                        const createplaylistbtn = await page.$x("//*[normalize-space(text())='Create']");
+                        await page.evaluate((el) => el.click(), createplaylistbtn[1]);
+                        createplaylistdone = await page.$x("//*[normalize-space(text())='Done']");
+                        await page.evaluate((el) => el.click(), createplaylistdone[0]);
+                        playlistSet = true;
+                    }
+                }
+                if (playlistSet) {
+                    messageTransport.debug(`  >> ${videoJSON.title} - Playlist set to ${playlistName}`);
+                }
+                else {
+                    messageTransport.warn(`  >> ${videoJSON.title} - Failed setting playlist`);
+                }
+        }
+    }
+    else if (playlistName) {
         let playlistSet = false;
         // Selecting playlist
         for (let i = 0; i < 2; i++) {
             try {
-                await page.evaluate((el) => el.click(), playlist[0])
+                await page.evaluate((el) => el.click(), playlist[0]);
                 // Type the playlist name to filter out
-                await page.waitForSelector('#search-input')
-                await page.focus(`#search-input`)
-                await page.type(`#search-input`, playlistName)
-
-                const escapedPlaylistName = escapeQuotesForXPath(playlistName)
-                const playlistToSelectXPath = '//*[normalize-space(text())=' + escapedPlaylistName + ']'
-                await page.waitForXPath(playlistToSelectXPath, { timeout: 10000 })
-                const playlistNameSelector = await page.$x(playlistToSelectXPath)
-                await page.evaluate((el) => el.click(), playlistNameSelector[0])
-                createplaylistdone = await page.$x("//*[normalize-space(text())='Done']")
+                await page.waitForSelector('#search-input');
+                await page.focus(`#search-input`);
+                await page.type(`#search-input`, playlistName);
+                const escapedPlaylistName = escapeQuotesForXPath(playlistName);
+                const playlistToSelectXPath = '//*[normalize-space(text())=' + escapedPlaylistName + ']';
+                await page.waitForXPath(playlistToSelectXPath, { timeout: 10000 });
+                const playlistNameSelector = await page.$x(playlistToSelectXPath);
+                await page.evaluate((el) => el.click(), playlistNameSelector[0]);
+                createplaylistdone = await page.$x("//*[normalize-space(text())='Done']");
                 await page.evaluate((el) => el.click(), createplaylistdone[0]);
                 playlistSet = true;
-                break
-            } catch (error) {
+                break;
+            }
+            catch (error) {
                 messageTransport.log(`  >> ${videoJSON.title} - ${playlistName} not found. Creating...`);
                 // Creating new playlist
                 // click on playlist dropdown
-                await page.evaluate((el) => el.click(), playlist[0])
+                await page.evaluate((el) => el.click(), playlist[0]);
                 // click New playlist button
-                const newPlaylistXPath =
-                    "//*[normalize-space(text())='New playlist'] | //*[normalize-space(text())='Create playlist']"
-                await page.waitForXPath(newPlaylistXPath)
-                const createplaylist = await page.$x(newPlaylistXPath)
-                await page.evaluate((el) => el.click(), createplaylist[0])
+                const newPlaylistXPath = "//*[normalize-space(text())='New playlist'] | //*[normalize-space(text())='Create playlist']";
+                await page.waitForXPath(newPlaylistXPath);
+                const createplaylist = await page.$x(newPlaylistXPath);
+                await page.evaluate((el) => el.click(), createplaylist[0]);
                 // Enter new playlist name
-                await page.keyboard.type(' ' + playlistName.substring(0, 148))
+                await page.keyboard.type(' ' + playlistName.substring(0, 148));
                 // click create & then done button
-                const createplaylistbtn = await page.$x("//*[normalize-space(text())='Create']")
-                await page.evaluate((el) => el.click(), createplaylistbtn[1])
-                createplaylistdone = await page.$x("//*[normalize-space(text())='Done']")
+                const createplaylistbtn = await page.$x("//*[normalize-space(text())='Create']");
+                await page.evaluate((el) => el.click(), createplaylistbtn[1]);
+                createplaylistdone = await page.$x("//*[normalize-space(text())='Done']");
                 await page.evaluate((el) => el.click(), createplaylistdone[0]);
                 playlistSet = true;
             }
         }
         if (playlistSet) {
             messageTransport.debug(`  >> ${videoJSON.title} - Playlist set to ${playlistName}`);
-        } else {
+        }
+        else {
             messageTransport.warn(`  >> ${videoJSON.title} - Failed setting playlist`);
         }
-        
     }
 
     if (!videoJSON.isNotForKid) {
