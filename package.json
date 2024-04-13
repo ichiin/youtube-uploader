@@ -1,5 +1,5 @@
 {
-  "name": "youtube-videos-uploader",
+  "name": "youtube-videos-uploader-ichiin",
   "version": "2.0.26",
   "description": "Uploads videos to youtube without any limits",
   "main": "dist/index.js",
@@ -41,9 +41,9 @@
   "author": "Fawaz Ahmed",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/fawazahmed0/youtube-uploader/issues"
+    "url": "https://github.com/ichiin/youtube-uploader/issues"
   },
-  "homepage": "https://github.com/fawazahmed0/youtube-uploader#readme",
+  "homepage": "https://github.com/ichiin/youtube-uploader#readme",
   "devDependencies": {
     "@types/fs-extra": "^9.0.13",
     "@types/node": "^18.7.2",
