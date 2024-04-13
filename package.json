@@ -20,7 +20,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/fawazahmed0/youtube-uploader.git"
+    "url": "git+https://github.com/ichiin/youtube-uploader.git"
   },
   "scripts": {
     "build": "tsc -p .",
