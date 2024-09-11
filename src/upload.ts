@@ -8,15 +8,10 @@ import {
     MessageTransport,
     GameData
 } from './types'
-import puppeteer from 'puppeteer-extra'
+import { connect } from 'puppeteer-real-browser'
 import { PuppeteerNodeLaunchOptions, Browser, Page } from 'puppeteer'
 import fs from 'fs-extra'
 import path from 'path'
-
-const StealthPlugin = require('puppeteer-extra-plugin-stealth')()
-StealthPlugin.enabledEvasions.delete('iframe.contentWindow')
-StealthPlugin.enabledEvasions.delete('navigator.plugins')
-puppeteer.use(StealthPlugin)
 
 const maxTitleLen = 100
 const maxDescLen = 5000
@@ -1178,9 +1173,15 @@ async function changeHomePageLangIfNeeded(localPage: Page) {
 }
 
 async function launchBrowser(puppeteerLaunch?: PuppeteerNodeLaunchOptions, loadCookies: boolean = true) {
-    browser = await puppeteer.launch(puppeteerLaunch)
-    page = await browser.newPage()
-    await page.setDefaultTimeout(timeout)
+    const {  page } = await connect({
+        headless: false,
+        args: [],
+        customConfig: {},
+        turnstile: true,
+        connectOption: {},
+        disableXvfb: false,
+        ignoreAllFlags: false,
+    })
 
     if (loadCookies) {
         const previousSession = fs.existsSync(cookiesFilePath)
