@@ -155,11 +155,11 @@ async function uploadVideo(videoJSON: Video, messageTransport: MessageTransport)
     const createBtnXPath = "xpath/.//*[@id='create-icon']/tp-yt-iron-icon"
     const addVideoBtnXPath = "xpath/.//*[@id='text-item-0']/ytcp-ve/div/div/yt-formatted-string"
 
-    if (await page.waitForSelector(createBtnXPath, { timeout: 5000 }).catch(() => null)) {
+    if (await page.waitForSelector(createBtnXPath, { timeout: 60000 }).catch(() => null)) {
         const createBtn = await page.$$(createBtnXPath)
         await createBtn[0].click()
     }
-    if (await page.waitForSelector(addVideoBtnXPath, { timeout: 5000 }).catch(() => null)) {
+    if (await page.waitForSelector(addVideoBtnXPath, { timeout: 60000 }).catch(() => null)) {
         const addVideoBtn = await page.$$(addVideoBtnXPath)
         await addVideoBtn[0].click()
     }
@@ -170,6 +170,7 @@ async function uploadVideo(videoJSON: Video, messageTransport: MessageTransport)
             break
         } catch (error) {
             const nextText = i === 0 ? ' trying again' : ' failed again'
+            await page.screenshot({ path: 'select files.png' });
             messageTransport.log('Failed to find the select files button' + nextText)
             messageTransport.log(error)
             await page.evaluate(() => {
@@ -306,7 +307,7 @@ async function uploadVideo(videoJSON: Video, messageTransport: MessageTransport)
                         await page.type(`#search-input`, playlistn);
                         const escapedPlaylistName = escapeQuotesForXPath(playlistn);
                         const playlistToSelectXPath = 'xpath/.//*[normalize-space(text())=' + escapedPlaylistName + ']';
-                        await page.waitForSelector(playlistToSelectXPath, { timeout: 10000 });
+                        await page.waitForSelector(playlistToSelectXPath, { timeout: 60000 });
                         const playlistNameSelector = await page.$$(playlistToSelectXPath);
                         await page.evaluate((el) => el.click(), playlistNameSelector[0]);
                         createplaylistdone = await page.$$("xpath/.//*[normalize-space(text())='Done']");
@@ -354,7 +355,7 @@ async function uploadVideo(videoJSON: Video, messageTransport: MessageTransport)
                 await page.type(`#search-input`, playlistName);
                 const escapedPlaylistName = escapeQuotesForXPath(playlistName);
                 const playlistToSelectXPath = 'xpath/.//*[normalize-space(text())=' + escapedPlaylistName + ']';
-                await page.waitForSelector(playlistToSelectXPath, { timeout: 10000 });
+                await page.waitForSelector(playlistToSelectXPath, { timeout: 60000 });
                 const playlistNameSelector = await page.$$(playlistToSelectXPath);
                 await page.evaluate((el) => el.click(), playlistNameSelector[0]);
                 createplaylistdone = await page.$$("xpath/.//*[normalize-space(text())='Done']");
@@ -463,7 +464,7 @@ async function uploadVideo(videoJSON: Video, messageTransport: MessageTransport)
 
     if (videoJSON.isChannelMonetized) {
         try {
-            await page.waitForSelector('#child-input ytcp-video-monetization', { visible: true, timeout: 10000 })
+            await page.waitForSelector('#child-input ytcp-video-monetization', { visible: true, timeout: 60000 })
 
             await sleep(1500)
 
@@ -500,7 +501,7 @@ async function uploadVideo(videoJSON: Video, messageTransport: MessageTransport)
         try {
             await page.waitForSelector(
                 '.ytpp-self-certification-questionnaire .ytpp-self-certification-questionnaire #checkbox-container',
-                { visible: true, timeout: 10000 }
+                { visible: true, timeout: 60000 }
             )
             await page.evaluate(() =>
                 (
@@ -858,7 +859,7 @@ const updateVideoInfo = async (videoJSON: VideoToEdit, messageTransport: Message
     await page.goto(videoUrl)
     const editXpath = 'xpath/.//*[@id="subscribe-button"]/ytd-button-renderer'
     try {
-        await page.waitForSelector(editXpath, { timeout: 7000 })
+        await page.waitForSelector(editXpath, { timeout: 60000 })
     } catch (err) {
         throw new Error('The video provided may not be yours')
     }
@@ -900,7 +901,7 @@ const updateVideoInfo = async (videoJSON: VideoToEdit, messageTransport: Message
     }
     if (thumb) {
         const [thumbChooser] = await Promise.all([
-            page.waitForFileChooser({ timeout: 500 }).catch(async () => {
+            page.waitForFileChooser({ timeout: 60000 }).catch(async () => {
                 messageTransport.log('replacing previous thumbanail')
                 await page.click('#still-1 > button')
                 await page.waitForSelector('#save > div')
@@ -930,7 +931,7 @@ const updateVideoInfo = async (videoJSON: VideoToEdit, messageTransport: Message
                 const escapedPlaylistName = escapeQuotesForXPath(playlistName)
                 const playlistToSelectXPath = 'xpath/.//*[normalize-space(text())=' + escapedPlaylistName + ']'
 
-                await page.waitForSelector(playlistToSelectXPath, { timeout: 10000 })
+                await page.waitForSelector(playlistToSelectXPath, { timeout: 60000 })
                 const playlistNameSelector = await page.$$(playlistToSelectXPath)
                 await page.evaluate((el) => el.click(), playlistNameSelector[0])
                 createplaylistdone = await page.$$("xpath/.//*[normalize-space(text())='Done']")
@@ -1074,7 +1075,7 @@ async function loadAccount(
 async function changeLoginPageLangIfNeeded(localPage: Page) {
     const selectedLangSelector = '[aria-selected="true"]'
     try {
-        await localPage.waitForSelector(selectedLangSelector, { timeout: 30000 });
+        await localPage.waitForSelector(selectedLangSelector, { timeout: 60000 });
         console.log("Selected language selector found");
     } catch (e: any) {
         console.log("Failed to find selected language selector:", e.message);
@@ -1106,7 +1107,7 @@ async function changeLoginPageLangIfNeeded(localPage: Page) {
     const englishLangItemSelector = '[role="presentation"]:not([aria-hidden="true"]) [data-value="en-GB"]'
 
     try {
-        await localPage.waitForSelector(englishLangItemSelector, { timeout: 30000 });
+        await localPage.waitForSelector(englishLangItemSelector, { timeout: 60000 });
         console.log("English language item found");
     } catch (e: any) {
         console.log("Failed to find english language item:", e.message);
@@ -1125,7 +1126,7 @@ async function changeHomePageLangIfNeeded(localPage: Page) {
     const avatarButtonSelector = 'button#avatar-btn'
 
     try {
-        await localPage.waitForSelector(avatarButtonSelector, { timeout: 30000 });
+        await localPage.waitForSelector(avatarButtonSelector, { timeout: 60000 });
         console.log("Avatar button found");
     } catch (e: any) {
         console.log("Avatar/Profile picture button not found:", e.message);
@@ -1192,7 +1193,7 @@ async function changeHomePageLangIfNeeded(localPage: Page) {
     const englishItemSelector = "xpath/.//*[normalize-space(text())='English (UK)']"
 
     try {
-        await localPage.waitForSelector(englishItemSelector, { timeout: 30000 });
+        await localPage.waitForSelector(englishItemSelector, { timeout: 60000 });
         console.log("English (UK) item found");
     } catch (e: any) {
         console.log("English(UK) item selector not found:", e.message);
