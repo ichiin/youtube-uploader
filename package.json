@@ -1,6 +1,6 @@
 {
   "name": "youtube-videos-uploader-ichiin",
-  "version": "2.0.32",
+  "version": "2.0.33",
   "description": "Uploads videos to youtube without any limits",
   "main": "dist/index.js",
   "types": "dist",
