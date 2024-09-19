@@ -1,3 +1,4 @@
+// @ts-nocheck
 import {
     Credentials,
     Video,
@@ -1139,9 +1140,11 @@ async function changeHomePageLangIfNeeded(localPage: Page) {
 
     try {
         //await sleep(1000000)
+        await page.screenshot({ path: 'before-click.png' });
         await localPage.waitForSelector(langMenuItemSelector, { timeout: 30000 });
         console.log("Language menu item found");
     } catch (e: any) {
+        await page.screenshot({ path: 'before-click.png' });
         console.log("Language menu item selector/button('>') not found:", e.message);
         throw new Error('Language menu item selector/button(">") not found: ' + e.message);
     }
@@ -1220,7 +1223,7 @@ async function changeHomePageLangIfNeeded(localPage: Page) {
 async function launchBrowser(puppeteerLaunch?: PuppeteerNodeLaunchOptions, loadCookies: boolean = true) {
     const { browser, page } = await connect({
         customConfig: {
-            chromePath: "/usr/bin/google-chrome"
+            chromePath: "/usr/bin/google-chrome",
         },
         headless: false,
     })
