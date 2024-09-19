@@ -1221,9 +1221,10 @@ async function changeHomePageLangIfNeeded(localPage: Page) {
 }
 
 async function launchBrowser(puppeteerLaunch?: PuppeteerNodeLaunchOptions, loadCookies: boolean = true) {
+    const chromePath = puppeteerLaunch?.executablePath || '/usr/bin/google-chrome';
     const { browser, page } = await connect({
         customConfig: {
-            chromePath: "/usr/bin/google-chrome",
+            chromePath,
         },
         headless: false,
     })
