@@ -29,6 +29,15 @@ const invalidCharacters = ['<', '>']
 
 const uploadURL = 'https://www.youtube.com/upload?persist_gl=1&gl=US&persist_hl=1&hl=en'
 const homePageURL = 'https://www.youtube.com/?persist_gl=1&gl=US&persist_hl=1&hl=en'
+const studioURL = 'https://studio.youtube.com/'
+const authenticatedProfileSelectors = [
+    'button#avatar-btn',
+    '#avatar-btn',
+    "button[aria-label*='Account']",
+    "button[aria-label*='Google Account']",
+    'ytcp-button#create-icon',
+    '#create-icon'
+]
 
 const defaultMessageTransport: MessageTransport = {
     log: console.log,
@@ -1048,14 +1057,65 @@ const updateVideoInfo = async (videoJSON: VideoToEdit, messageTransport: Message
     return messageTransport.log('successfully edited')
 }
 
+async function waitForAnySelector(localPage: Page, selectors: string[], timeout = 15000): Promise<boolean> {
+    const checks = selectors.map((selector) =>
+        localPage.waitForSelector(selector, { timeout }).then(
+            () => true,
+            () => false
+        )
+    )
+
+    return (await Promise.race(checks)) === true
+}
+
+async function isAuthenticatedInCurrentProfile(
+    localPage: Page,
+    messageTransport: MessageTransport
+): Promise<boolean> {
+    try {
+        await localPage.goto(studioURL)
+
+        if (localPage.url && localPage.url().includes('accounts.google.com')) {
+            return false
+        }
+
+        const authenticated = await waitForAnySelector(localPage, authenticatedProfileSelectors, 30000)
+        if (authenticated) {
+            messageTransport.log('Authenticated Chrome profile detected')
+        }
+        return authenticated
+    } catch (error) {
+        messageTransport.log(error)
+        return false
+    }
+}
+
 async function loadAccount(
     credentials: Credentials,
     messageTransport: MessageTransport,
     useCookieStore: boolean = true
 ) {
+    if (!useCookieStore) {
+        const authenticatedProfile = await isAuthenticatedInCurrentProfile(page, messageTransport)
+        if (!authenticatedProfile) {
+            throw new Error(
+                'Persistent Chrome profile is not authenticated. Run the VNC login service to refresh the Chrome profile before uploading.'
+            )
+        }
+
+        try {
+            await changeHomePageLangIfNeeded(page)
+        } catch (error) {
+            messageTransport.log(error)
+            messageTransport.log('Skipping credential login retry because authenticated Chrome profile is active')
+            await page.goto(uploadURL)
+        }
+
+        return
+    }
+
     try {
-        if (!fs.existsSync(cookiesFilePath) || !useCookieStore)
-            await login(page, credentials, messageTransport, useCookieStore)
+        if (!fs.existsSync(cookiesFilePath)) await login(page, credentials, messageTransport, useCookieStore)
     } catch (error: any) {
         if (error.message === 'Recapcha found') {
             if (browser) {
@@ -1235,8 +1295,10 @@ async function launchBrowser(puppeteerLaunch?: PuppeteerNodeLaunchOptions, loadC
     const chromePath = puppeteerLaunch?.executablePath || '/usr/bin/google-chrome'
     const { browser, page } = await connect({
         customConfig: {
-            chromePath
+            chromePath,
+            userDataDir: (puppeteerLaunch as any)?.userDataDir,
         },
+        args: (puppeteerLaunch as any)?.args || [],
         headless: false,
         connectOption: {
             protocolTimeout: 0  // disable CDP timeout; let selector timeouts govern
@@ -1271,16 +1333,15 @@ async function login(
     await localPage.goto(uploadURL)
 
     if (!useCookieStore) {
-        try {
-            // Check if already logged in if we don't use normal cookie store
-            await localPage.waitForSelector('button#avatar-btn', {
-                timeout: 15 * 1000
-            })
-
+        if (await isAuthenticatedInCurrentProfile(localPage, messageTransport)) {
             messageTransport.log(`Account already logged in`)
-
+            await localPage.goto(uploadURL)
             return
-        } catch {}
+        }
+
+        throw new Error(
+            'Persistent Chrome profile is not authenticated. Run the VNC login service to refresh the Chrome profile before uploading.'
+        )
     }
 
     await changeLoginPageLangIfNeeded(localPage)
