@@ -157,7 +157,10 @@ async function uploadVideo(videoJSON: Video, messageTransport: MessageTransport)
     messageTransport.debug(`  >> ${videoJSON.title} - Upload URL opened`)
 
     const closeBtnXPath = "xpath/.//*[normalize-space(text())='Close']"
-    const selectBtnPath = '#select-files-button > ytcp-button-shape > button > div'
+    // Descendant combinators on purpose: YouTube inserts/removes wrapper divs
+    // inside ytcp-button-shape without notice (2026-08 outage: a new wrapper
+    // div broke the previous direct-child chain and every upload with it).
+    const selectBtnPath = '#select-files-button ytcp-button-shape button'
     const saveCloseBtnXPath = "xpath/.///*[@aria-label='Save and close']/tp-yt-iron-icon"
     const createBtnXPath = "xpath/.//*[@id='create-icon']/tp-yt-iron-icon"
     const addVideoBtnXPath = "xpath/.//*[@id='text-item-0']/ytcp-ve/div/div/yt-formatted-string"
