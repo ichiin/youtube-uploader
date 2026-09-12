@@ -575,18 +575,37 @@ async function uploadVideo(videoJSON: Video, messageTransport: MessageTransport)
 
     const closeDialogXPath = uploadAsDraft ? saveCloseBtnXPath : publishXPath
 
-    // Publish, then confirm it actually took. YouTube can interpose an advisory
-    // modal over this step whose backdrop swallows the click (2026-09: "We're
-    // still checking your content"), which used to leave the video as a silent
-    // unpublished draft while the run died 30s later on the Close button. So:
-    // clear whatever is in the way, click, and verify the post-publish Close
-    // button really appeared before calling it done.
+    // Publish, then confirm it actually took. Two things sit between us and a
+    // published video, and both look like "a dialog":
+    //  - the advisory modal over the Visibility step (2026-09: "We're still
+    //    checking your content"), whose backdrop swallows a click on Publish —
+    //    but whose own "Publish anyway" button publishes outright;
+    //  - the post-publish "Video processing … Close" dialog, which must NEVER be
+    //    dismissed here: its Close button is the only proof the publish landed.
+    // `visible: true` is load-bearing: a bare XPath match ignores rendering, and
+    // YouTube keeps other "Close" leaves in the DOM (the upload dialog's own is
+    // renamed to "oldclosse" above for exactly this reason). Without it a hidden
+    // match would report success for a video that was never published.
+    const isPublished = async (timeout: number) =>
+        Boolean(await page.waitForSelector(closeBtnXPath, { visible: true, timeout }).catch(() => null))
+
     let published = false
     for (let attempt = 0; attempt < 5 && !published; attempt++) {
-        await dismissAdvisoryDialog(page, messageTransport)
+        if (!uploadAsDraft && (await isPublished(1000))) {
+            published = true
+            break
+        }
+
+        // Confirming the advisory dialog publishes the video by itself, so give
+        // the success dialog a chance to appear before going for the wizard's
+        // own Publish button — which by then no longer exists.
+        if ((await dismissAdvisoryDialog(page, messageTransport)) && !uploadAsDraft) {
+            published = await isPublished(20000)
+            if (published) break
+        }
 
         try {
-            await page.waitForSelector(closeDialogXPath)
+            await page.waitForSelector(closeDialogXPath, { timeout: 20000 })
             const closeDialog = await page.$$(closeDialogXPath)
             await closeDialog[0].click()
         } catch (error) {
@@ -605,9 +624,9 @@ async function uploadVideo(videoJSON: Video, messageTransport: MessageTransport)
         // no closeBtn will show up if keeps video as draft
         if (uploadAsDraft) return uploadedLink
 
-        // The Close button of the "Video published" dialog is the only proof the
+        // The Close button of the post-publish dialog is the only proof the
         // publish landed rather than hitting a modal backdrop.
-        published = Boolean(await page.waitForSelector(closeBtnXPath, { timeout: 20000 }).catch(() => null))
+        published = await isPublished(20000)
     }
 
     if (!published) {
@@ -1161,8 +1180,23 @@ async function inspectAdvisoryDialogs(
                 const labelOf = (el: Element) =>
                     ((el as HTMLElement).innerText || el.getAttribute('aria-label') || '').trim()
 
+                // The post-publish "Video processing … Close" dialog matches the
+                // same selector as the advisories. Closing it would destroy the
+                // caller's only evidence that publishing succeeded, so identify it
+                // by the very leaf the caller waits on — a plain "Close" button —
+                // and leave it alone. (The wizard's own hidden Close text was
+                // renamed to "oldclosse" at the start of the upload precisely so
+                // that this test is unambiguous.)
+                const isPostPublishDialog = (el: Element) =>
+                    [...el.querySelectorAll('*')].some(
+                        (n) => n.children.length === 0 && (n.textContent || '').trim() === 'Close'
+                    )
+
                 const candidates = [...document.querySelectorAll(sel)].filter(
-                    (el) => isVisible(el) && !markers.some((m: string) => el.querySelector(m) || el.matches(m))
+                    (el) =>
+                        isVisible(el) &&
+                        !isPostPublishDialog(el) &&
+                        !markers.some((m: string) => el.querySelector(m) || el.matches(m))
                 )
                 // Drop any candidate that merely wraps another one, so "the dialog"
                 // is the innermost real modal.
