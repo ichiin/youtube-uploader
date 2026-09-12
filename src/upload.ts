@@ -18,8 +18,12 @@ const maxTitleLen = 100
 const maxDescLen = 5000
 
 const timeout = 60000
-const height = 900
-const width = 900
+// Big enough that YouTube's advisory modals fit inside the viewport. At the old
+// 900x900 (and the 800x600 the OS window actually ended up at) the 2026-09
+// "We're still checking your content" dialog rendered its action buttons below
+// the window edge, where nothing can click them.
+const height = 1200
+const width = 1600
 
 let browser: Browser, page: PageWithCursor
 let cookiesDirPath: string
@@ -570,38 +574,50 @@ async function uploadVideo(videoJSON: Video, messageTransport: MessageTransport)
     } while (uploadedLink === videoBaseLink || uploadedLink === shortVideoBaseLink)
 
     const closeDialogXPath = uploadAsDraft ? saveCloseBtnXPath : publishXPath
-    let closeDialog
-    for (let i = 0; i < 10; i++) {
+
+    // Publish, then confirm it actually took. YouTube can interpose an advisory
+    // modal over this step whose backdrop swallows the click (2026-09: "We're
+    // still checking your content"), which used to leave the video as a silent
+    // unpublished draft while the run died 30s later on the Close button. So:
+    // clear whatever is in the way, click, and verify the post-publish Close
+    // button really appeared before calling it done.
+    let published = false
+    for (let attempt = 0; attempt < 5 && !published; attempt++) {
+        await dismissAdvisoryDialog(page, messageTransport)
+
         try {
             await page.waitForSelector(closeDialogXPath)
-            closeDialog = await page.$$(closeDialogXPath)
+            const closeDialog = await page.$$(closeDialogXPath)
             await closeDialog[0].click()
-            break
         } catch (error) {
             await sleep(5000)
+            continue
         }
+
+        if (videoJSON.isChannelMonetized) {
+            try {
+                await page.waitForSelector('#dialog-buttons #secondary-action-button', { visible: true })
+
+                await page.click('#dialog-buttons #secondary-action-button')
+            } catch {}
+        }
+
+        // no closeBtn will show up if keeps video as draft
+        if (uploadAsDraft) return uploadedLink
+
+        // The Close button of the "Video published" dialog is the only proof the
+        // publish landed rather than hitting a modal backdrop.
+        published = Boolean(await page.waitForSelector(closeBtnXPath, { timeout: 20000 }).catch(() => null))
     }
 
-    if (videoJSON.isChannelMonetized) {
-        try {
-            await page.waitForSelector('#dialog-buttons #secondary-action-button', { visible: true })
-
-            await page.click('#dialog-buttons #secondary-action-button')
-        } catch {}
-    }
-
-    // await page.waitForXPath('//*[contains(text(),"Finished processing")]', { timeout: 0})
-
-    // no closeBtn will show up if keeps video as draft
-    if (uploadAsDraft) return uploadedLink
-
-    // Wait for closebtn to show up
-    try {
-        await page.waitForSelector(closeBtnXPath)
-    } catch (e) {
+    if (!published) {
+        const dialogs = await describeOpenDialogs(page)
+        const shot = await saveDebugScreenshot(page, videoJSON.title, messageTransport)
         await browser.close()
         throw new Error(
-            'Please make sure you set up your default video visibility correctly, you might have forgotten. More infos : https://github.com/fawazahmed0/youtube-uploader#youtube-setup'
+            `Publish did not complete for "${videoJSON.title}": the post-publish Close button never appeared ` +
+                `after 5 attempts. Open dialogs at failure: ${dialogs}.` +
+                (shot ? ` Screenshot: ${shot}` : '')
         )
     }
 
@@ -1071,6 +1087,169 @@ async function waitForAnySelector(localPage: Page, selectors: string[], timeout 
     return (await Promise.race(checks)) === true
 }
 
+// Any dialog-ish element YouTube may raise over the upload flow.
+const ADVISORY_DIALOG_SELECTOR = 'tp-yt-paper-dialog, ytcp-confirmation-dialog, ytcp-dialog'
+// Hallmarks of the upload wizard itself. A dialog containing any of these IS the
+// wizard (or its wrapper) and must never be dismissed — clicking its ✕ would
+// abandon the upload outright.
+const UPLOAD_WIZARD_MARKERS = [
+    'ytcp-uploads-dialog',
+    '#select-files-button',
+    '#privacy-radios',
+    'ytcp-video-metadata-editor'
+]
+// Labels that mean "yes, carry on publishing", most specific first. Anything that
+// cancels or goes back is deliberately absent — dismissing must never undo the
+// publish the caller asked for.
+const ADVISORY_CONFIRM_LABELS = [
+    'publish anyway',
+    'publish now',
+    'publish',
+    'continue',
+    'got it',
+    'okay',
+    'ok',
+    'dismiss'
+]
+
+/**
+ * Dump what the page looked like when an upload failed. Written next to the
+ * caller's logs when it keeps a ./logs directory (the replays-upload container
+ * bind-mounts one), otherwise to the temp dir. Best effort — a failed screenshot
+ * must never mask the error it was taken for.
+ */
+async function saveDebugScreenshot(
+    localPage: Page,
+    title: string,
+    messageTransport: MessageTransport
+): Promise<string | null> {
+    try {
+        const logsDir = path.join(process.cwd(), 'logs')
+        const dir = process.env.YT_UPLOADER_DEBUG_DIR || (fs.existsSync(logsDir) ? logsDir : require('os').tmpdir())
+        const safeTitle = title.replace(/[^a-zA-Z0-9-_]+/g, '_').slice(0, 60)
+        const file = path.join(dir, `upload-fail-${safeTitle}-${Date.now()}.png`)
+        await localPage.screenshot({ path: file, fullPage: false })
+        return file
+    } catch (error) {
+        messageTransport.warn(`Could not save failure screenshot: ${error}`)
+        return null
+    }
+}
+
+/**
+ * Find the advisory modals sitting over the upload flow, and optionally clear the
+ * topmost one — both in a single page-side pass so the thing described is the
+ * thing dismissed.
+ *
+ * The wizard's own dialog is excluded by content (UPLOAD_WIZARD_MARKERS) rather
+ * than by ancestry: YouTube nests these modals inside the uploads dialog, so an
+ * `el.closest('ytcp-uploads-dialog')` test would filter out the very dialog we
+ * are after. Returns one description string per advisory dialog plus, when
+ * dismissing, the label of whatever was clicked.
+ */
+async function inspectAdvisoryDialogs(
+    localPage: Page,
+    dismiss: boolean
+): Promise<{ descriptions: string[]; dismissedVia: string | null }> {
+    try {
+        return await localPage.evaluate(
+            (sel, markers, labels, shouldDismiss) => {
+                const isVisible = (el: Element) => {
+                    const rect = (el as HTMLElement).getBoundingClientRect()
+                    return rect.width > 0 && rect.height > 0
+                }
+                const labelOf = (el: Element) =>
+                    ((el as HTMLElement).innerText || el.getAttribute('aria-label') || '').trim()
+
+                const candidates = [...document.querySelectorAll(sel)].filter(
+                    (el) => isVisible(el) && !markers.some((m: string) => el.querySelector(m) || el.matches(m))
+                )
+                // Drop any candidate that merely wraps another one, so "the dialog"
+                // is the innermost real modal.
+                const dialogs = candidates.filter((el) => !candidates.some((other) => other !== el && el.contains(other)))
+
+                const descriptions = dialogs.map((el) => {
+                    const text = ((el as HTMLElement).innerText || '').replace(/\s+/g, ' ').trim().slice(0, 300)
+                    const buttons = [...el.querySelectorAll('button, ytcp-button, tp-yt-paper-button')]
+                        .map(labelOf)
+                        .filter(Boolean)
+                    return `<${el.tagName.toLowerCase()}> "${text}" buttons=[${buttons.join(' | ')}]`
+                })
+
+                let dismissedVia: string | null = null
+                const target = dialogs[dialogs.length - 1]
+                if (shouldDismiss && target) {
+                    const buttons = [...target.querySelectorAll('button, ytcp-button, tp-yt-paper-button')].filter(isVisible)
+                    for (const label of labels) {
+                        const match = buttons.find((b) => labelOf(b).toLowerCase() === label)
+                        if (match) {
+                            ;(match as HTMLElement).click()
+                            dismissedVia = labelOf(match)
+                            break
+                        }
+                    }
+                    if (!dismissedVia) {
+                        const closeBtn = target.querySelector(
+                            '#close-button, ytcp-icon-button#close-button, [aria-label="Close"], [aria-label="close"]'
+                        )
+                        if (closeBtn && isVisible(closeBtn)) {
+                            ;(closeBtn as HTMLElement).click()
+                            dismissedVia = 'close (X)'
+                        }
+                    }
+                }
+
+                return { descriptions, dismissedVia }
+            },
+            ADVISORY_DIALOG_SELECTOR,
+            UPLOAD_WIZARD_MARKERS,
+            ADVISORY_CONFIRM_LABELS,
+            dismiss
+        )
+    } catch (error) {
+        return { descriptions: [`unavailable (${error})`], dismissedVia: null }
+    }
+}
+
+/**
+ * Describe every advisory dialog currently open, for logging. YouTube changes
+ * this flow without notice (2026-08: a wrapper div broke the select-files button;
+ * 2026-09: a "We're still checking your content" modal swallowed every publish
+ * click), and each time the only symptom was a selector timeout with no clue
+ * what was on screen. This turns the next drift into a readable log line.
+ */
+async function describeOpenDialogs(localPage: Page): Promise<string> {
+    const { descriptions } = await inspectAdvisoryDialogs(localPage, false)
+    return descriptions.length ? descriptions.join(' ;; ') : 'none'
+}
+
+/**
+ * Clear an advisory modal that is blocking the flow, and report whether one was
+ * there. The 2026-09 "We're still checking your content" dialog sits over the
+ * Visibility step: page.click() on Publish lands on its backdrop, so the video
+ * silently stays an unpublished draft and the run dies 30s later waiting for a
+ * Close button that can never appear.
+ *
+ * Tries, in order: a button that means "carry on" (see ADVISORY_CONFIRM_LABELS),
+ * the dialog's own close affordance, then Escape. Never clicks Cancel.
+ */
+async function dismissAdvisoryDialog(localPage: Page, messageTransport: MessageTransport): Promise<boolean> {
+    const { descriptions, dismissedVia } = await inspectAdvisoryDialogs(localPage, true)
+    if (!descriptions.length) return false
+
+    messageTransport.log(`  >> Advisory dialog in the way: ${descriptions.join(' ;; ')}`)
+
+    if (dismissedVia) {
+        messageTransport.log(`  >> Advisory dialog dismissed via "${dismissedVia}"`)
+    } else {
+        await localPage.keyboard.press('Escape').catch(() => {})
+        messageTransport.log('  >> Advisory dialog had no known button — pressed Escape')
+    }
+
+    await sleep(1000)
+    return true
+}
+
 async function isAuthenticatedInCurrentProfile(
     localPage: Page,
     messageTransport: MessageTransport
@@ -1296,12 +1475,19 @@ async function changeHomePageLangIfNeeded(localPage: Page) {
 
 async function launchBrowser(puppeteerLaunch?: PuppeteerNodeLaunchOptions, loadCookies: boolean = true) {
     const chromePath = puppeteerLaunch?.executablePath || '/usr/bin/google-chrome'
+    // setViewport alone does not resize the OS window under puppeteer-real-browser's
+    // connect(), so Chrome kept its 800x600 default and clipped tall dialogs. Ask for
+    // the real window size up front unless the caller already pinned one.
+    const args = [...((puppeteerLaunch as any)?.args || [])]
+    if (!args.some((a: string) => String(a).startsWith('--window-size'))) {
+        args.push(`--window-size=${width},${height}`)
+    }
     const { browser, page } = await connect({
         customConfig: {
             chromePath,
             userDataDir: (puppeteerLaunch as any)?.userDataDir,
         },
-        args: (puppeteerLaunch as any)?.args || [],
+        args,
         headless: false,
         connectOption: {
             protocolTimeout: 0  // disable CDP timeout; let selector timeouts govern
